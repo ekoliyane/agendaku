@@ -44,6 +44,63 @@ body {
     -webkit-font-smoothing: antialiased;
 }
 
+/* ============ LOGIN SCREEN ============ */
+.login-screen {
+    position: fixed;
+    inset: 0;
+    background: linear-gradient(135deg, #e8edff 0%, #f5f7fb 50%, #ecfdf5 100%);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+}
+
+.login-screen.hidden {
+    display: none;
+}
+
+.login-card {
+    text-align: center;
+    background: var(--bg-card);
+    padding: 48px 40px;
+    border-radius: 20px;
+    box-shadow: var(--shadow-lg);
+    border: 1px solid var(--border-light);
+    max-width: 380px;
+    width: 90%;
+}
+
+.login-icon {
+    font-size: 56px;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.login-card h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+    letter-spacing: -0.5px;
+}
+
+.login-subtitle {
+    font-size: 14px;
+    color: var(--text-muted);
+    margin-bottom: 28px;
+}
+
+#googleBtnContainer {
+    display: flex;
+    justify-content: center;
+    margin-bottom: 16px;
+}
+
+.login-hint {
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
 /* ============ HEADER ============ */
 .header {
     background: var(--bg-card);
@@ -56,10 +113,50 @@ body {
 .header-content {
     max-width: 640px;
     margin: 0 auto;
-    padding: 16px 20px;
+    padding: 12px 20px;
     display: flex;
     align-items: center;
     justify-content: space-between;
+}
+
+.header-right {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.user-menu {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.user-avatar {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    border: 2px solid var(--border);
+    cursor: default;
+}
+
+.btn-logout {
+    width: 32px;
+    height: 32px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--text-muted);
+    transition: all var(--transition);
+}
+
+.btn-logout:hover {
+    background: var(--danger-light);
+    color: var(--danger);
+    border-color: var(--danger);
 }
 
 .logo {
