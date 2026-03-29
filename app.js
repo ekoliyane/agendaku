@@ -376,7 +376,7 @@
         const todayKey = getDateKey(new Date());
         const $list = $('#historyList'), $empty = $('#historyEmpty');
         $list.innerHTML = '';
-        const historyDates = Object.keys(allData).filter(d => d !== todayKey && allData[d].length > 0).sort().reverse();
+        const historyDates = Object.keys(allData).filter(d => allData[d].length > 0).sort().reverse();
         if (historyDates.length === 0) { $empty.style.display = 'block'; return; }
         $empty.style.display = 'none';
         historyDates.slice(0, 14).forEach(dk => {
