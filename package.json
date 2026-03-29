@@ -1,0 +1,9 @@
+{
+  "name": "agendaku",
+  "version": "1.0.0",
+  "description": "AgendaKu — Aplikasi produktivitas harian",
+  "private": true,
+  "dependencies": {
+    "@neondatabase/serverless": "^0.10.0"
+  }
+}
