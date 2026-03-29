@@ -1,16 +1,25 @@
 // ============================================
-// AgendaKu — App Logic
+// AgendaKu — App Logic (Online via Google Sheets)
 // ============================================
 
 (function () {
     'use strict';
 
-    // --- Helpers ---
-    const $ = (sel) => document.querySelector(sel);
-    const STORAGE_KEY = 'agendaku_data';
+    // =============================================
+    // ⬇️ PASTE YOUR APPS SCRIPT WEB APP URL HERE ⬇️
+    // =============================================
+    const API_URL = '';
+    // =============================================
 
+    const $ = (sel) => document.querySelector(sel);
+    const CACHE_KEY = 'agendaku_cache';
+
+    // --- Helpers ---
     function getDateKey(date) {
-        return date.toISOString().slice(0, 10);
+        const y = date.getFullYear();
+        const m = String(date.getMonth() + 1).padStart(2, '0');
+        const d = String(date.getDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
     }
 
     function formatDateFull(date) {
@@ -40,92 +49,89 @@
         return Date.now().toString(36) + Math.random().toString(36).substr(2, 5);
     }
 
-    // --- Data Layer ---
-    function loadData() {
-        try {
-            const raw = localStorage.getItem(STORAGE_KEY);
-            return raw ? JSON.parse(raw) : {};
-        } catch (e) { return {}; }
-    }
-
-    function saveData(data) {
-        localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-    }
-
-    function getDayTasks(dateKey) {
-        return loadData()[dateKey] || [];
-    }
-
-    function setDayTasks(dateKey, tasks) {
-        const data = loadData();
-        data[dateKey] = tasks;
-        saveData(data);
-    }
-
-    // --- Carry-Over Logic ---
-    function processCarryOver(todayKey) {
-        const data = loadData();
-        const dates = Object.keys(data).filter(d => d < todayKey).sort().reverse();
-        if (dates.length === 0) return;
-
-        const lastDate = dates[0];
-        const lastTasks = data[lastDate] || [];
-        const todayTasks = data[todayKey] || [];
-
-        const existingCarryIds = todayTasks.filter(t => t.carryOver).map(t => t.originalId || t.id);
-        const toCarry = lastTasks.filter(t => !t.done && !existingCarryIds.includes(t.id));
-        if (toCarry.length === 0) return;
-
-        const newCarried = toCarry.map(t => ({
-            id: generateId(),
-            text: t.text,
-            priority: t.priority,
-            notes: t.notes || '',
-            link: t.link || '',
-            done: false,
-            carryOver: true,
-            originalId: t.id,
-            fromDate: lastDate,
-            createdAt: Date.now()
-        }));
-
-        data[todayKey] = [...newCarried, ...todayTasks];
-        saveData(data);
-    }
-
-    // --- Streak ---
-    function calculateStreak() {
-        const data = loadData();
-        let streak = 0;
-        const today = new Date();
-        const todayKey = getDateKey(today);
-        let checkDate = new Date(today);
-
-        if (!data[todayKey] || data[todayKey].length === 0) {
-            checkDate.setDate(checkDate.getDate() - 1);
-        }
-
-        for (let i = 0; i < 365; i++) {
-            const key = getDateKey(checkDate);
-            const tasks = data[key];
-            if (!tasks || tasks.length === 0) break;
-            if (!tasks.every(t => t.done)) break;
-            streak++;
-            checkDate.setDate(checkDate.getDate() - 1);
-        }
-        return streak;
-    }
-
-    // --- App State ---
-    let currentDate = new Date();
-    let openDetailId = null; // track which task's detail panel is open
-
-    // --- Escape HTML ---
     function escapeHtml(text) {
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
     }
+
+    // --- Cache Layer (localStorage as offline cache) ---
+    function getCache() {
+        try { return JSON.parse(localStorage.getItem(CACHE_KEY) || '{}'); }
+        catch (e) { return {}; }
+    }
+    function setCache(data) {
+        localStorage.setItem(CACHE_KEY, JSON.stringify(data));
+    }
+    function getCachedTasks(dateKey) {
+        return getCache()[dateKey] || [];
+    }
+    function setCachedTasks(dateKey, tasks) {
+        const cache = getCache();
+        cache[dateKey] = tasks;
+        setCache(cache);
+    }
+
+    // --- API Layer ---
+    let allData = {}; // in-memory store for all dates
+
+    async function apiCall(action, params = {}, body = null) {
+        if (!API_URL) return null; // fallback to cache-only
+        const url = new URL(API_URL);
+        url.searchParams.set('action', action);
+        Object.keys(params).forEach(k => url.searchParams.set(k, params[k]));
+
+        try {
+            const opts = { redirect: 'follow' };
+            if (body) {
+                opts.method = 'POST';
+                opts.headers = { 'Content-Type': 'text/plain' };
+                opts.body = JSON.stringify(body);
+            }
+            const res = await fetch(url.toString(), opts);
+            return await res.json();
+        } catch (err) {
+            console.warn('API error, using cache:', err);
+            return null;
+        }
+    }
+
+    async function loadAllFromAPI() {
+        showLoading(true);
+        const result = await apiCall('getAllTasks');
+        if (result && result.dates) {
+            allData = result.dates;
+            setCache(allData);
+        } else {
+            allData = getCache();
+        }
+        showLoading(false);
+    }
+
+    function getDayTasks(dateKey) {
+        return allData[dateKey] || [];
+    }
+
+    // --- Loading indicator ---
+    function showLoading(show) {
+        let el = $('#loadingIndicator');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'loadingIndicator';
+            el.style.cssText = 'position:fixed;top:0;left:0;right:0;height:3px;background:linear-gradient(90deg,#4f6ef7,#818cf8);z-index:9999;transition:opacity 0.3s;';
+            el.innerHTML = '<div style="height:100%;width:30%;background:rgba(255,255,255,0.3);animation:loadSlide 1s ease infinite;"></div>';
+            const styleEl = document.createElement('style');
+            styleEl.textContent = '@keyframes loadSlide{0%{transform:translateX(-100%)}100%{transform:translateX(400%)}}';
+            document.head.appendChild(styleEl);
+            document.body.appendChild(el);
+        }
+        el.style.opacity = show ? '1' : '0';
+        el.style.pointerEvents = show ? 'auto' : 'none';
+    }
+
+    // --- App State ---
+    let currentDate = new Date();
+    let openDetailId = null;
 
     // --- UI Rendering ---
     function render() {
@@ -232,63 +238,56 @@
             </div>
         `;
 
-        // --- Event: Toggle checkbox ---
+        // Toggle checkbox
         li.querySelector('input[type="checkbox"]').addEventListener('change', (e) => {
             e.stopPropagation();
             toggleTask(dateKey, task.id);
         });
         li.querySelector('.task-checkbox').addEventListener('click', (e) => e.stopPropagation());
 
-        // --- Event: Click task row to expand/collapse detail ---
+        // Click row to expand/collapse
         li.addEventListener('click', (e) => {
-            // Don't toggle if clicking inside detail panel or action buttons
             if (e.target.closest('.task-detail') || e.target.closest('.task-actions')) return;
             openDetailId = openDetailId === task.id ? null : task.id;
             render();
         });
 
-        // --- Event: Edit button ---
+        // Edit button
         li.querySelector('.btn-edit').addEventListener('click', (e) => {
             e.stopPropagation();
             startInlineEdit(li, task, dateKey);
         });
 
-        // --- Event: Delete button ---
+        // Delete button
         li.querySelector('.btn-delete').addEventListener('click', (e) => {
             e.stopPropagation();
             li.classList.add('removing');
             setTimeout(() => deleteTask(dateKey, task.id), 300);
         });
 
-        // --- Event: Notes change (auto-save on blur) ---
+        // Notes auto-save
         const notesEl = li.querySelector('.task-notes');
         notesEl.addEventListener('blur', () => {
             updateTaskField(dateKey, task.id, 'notes', notesEl.value);
         });
         notesEl.addEventListener('click', (e) => e.stopPropagation());
 
-        // --- Event: Link change (auto-save on blur) ---
+        // Link auto-save
         const linkInput = li.querySelector('.task-link-input');
         const linkOpen = li.querySelector('.task-link-open');
-
         linkInput.addEventListener('blur', () => {
             updateTaskField(dateKey, task.id, 'link', linkInput.value);
             linkOpen.disabled = !linkInput.value.trim();
         });
         linkInput.addEventListener('click', (e) => e.stopPropagation());
         linkInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                linkInput.blur();
-            }
+            if (e.key === 'Enter') { e.preventDefault(); linkInput.blur(); }
         });
-
         linkOpen.addEventListener('click', (e) => {
             e.stopPropagation();
             const url = linkInput.value.trim();
             if (url) {
-                const finalUrl = url.match(/^https?:\/\//) ? url : 'https://' + url;
-                window.open(finalUrl, '_blank');
+                window.open(url.match(/^https?:\/\//) ? url : 'https://' + url, '_blank');
             }
         });
 
@@ -299,7 +298,6 @@
     function startInlineEdit(li, task, dateKey) {
         const textSpan = li.querySelector('.task-text');
         const oldText = task.text;
-
         const input = document.createElement('input');
         input.type = 'text';
         input.className = 'task-text-edit';
@@ -315,7 +313,6 @@
             }
             render();
         }
-
         input.addEventListener('blur', finishEdit);
         input.addEventListener('keydown', (e) => {
             if (e.key === 'Enter') { e.preventDefault(); input.blur(); }
@@ -324,40 +321,116 @@
         input.addEventListener('click', (e) => e.stopPropagation());
     }
 
-    // --- Actions ---
-    function addTask(text, priority) {
+    // --- Actions (with API sync) ---
+    async function addTask(text, priority) {
         const dateKey = getDateKey(currentDate);
-        const tasks = getDayTasks(dateKey);
-        tasks.push({
+        const task = {
             id: generateId(),
+            date: dateKey,
             text: text.trim(),
             priority,
             notes: '',
             link: '',
             done: false,
             carryOver: false,
+            originalId: '',
+            fromDate: '',
             createdAt: Date.now()
-        });
-        setDayTasks(dateKey, tasks);
+        };
+
+        // Update local immediately
+        if (!allData[dateKey]) allData[dateKey] = [];
+        allData[dateKey].push(task);
+        setCachedTasks(dateKey, allData[dateKey]);
         render();
+
+        // Sync to API
+        await apiCall('addTask', {}, task);
     }
 
-    function toggleTask(dateKey, taskId) {
-        const tasks = getDayTasks(dateKey);
+    async function toggleTask(dateKey, taskId) {
+        const tasks = allData[dateKey] || [];
         const task = tasks.find(t => t.id === taskId);
-        if (task) { task.done = !task.done; setDayTasks(dateKey, tasks); render(); }
+        if (!task) return;
+        task.done = !task.done;
+        setCachedTasks(dateKey, tasks);
+        render();
+        await apiCall('updateTask', {}, { id: taskId, done: task.done });
     }
 
-    function deleteTask(dateKey, taskId) {
-        setDayTasks(dateKey, getDayTasks(dateKey).filter(t => t.id !== taskId));
+    async function deleteTask(dateKey, taskId) {
+        allData[dateKey] = (allData[dateKey] || []).filter(t => t.id !== taskId);
         if (openDetailId === taskId) openDetailId = null;
+        setCachedTasks(dateKey, allData[dateKey]);
         render();
+        await apiCall('deleteTask', { id: taskId });
     }
 
-    function updateTaskField(dateKey, taskId, field, value) {
-        const tasks = getDayTasks(dateKey);
+    async function updateTaskField(dateKey, taskId, field, value) {
+        const tasks = allData[dateKey] || [];
         const task = tasks.find(t => t.id === taskId);
-        if (task) { task[field] = value; setDayTasks(dateKey, tasks); }
+        if (!task) return;
+        task[field] = value;
+        setCachedTasks(dateKey, tasks);
+        const update = { id: taskId };
+        update[field] = value;
+        await apiCall('updateTask', {}, update);
+    }
+
+    // --- Carry-Over ---
+    async function processCarryOver(todayKey) {
+        const dates = Object.keys(allData).filter(d => d < todayKey).sort().reverse();
+        if (dates.length === 0) return;
+
+        const lastDate = dates[0];
+        const lastTasks = allData[lastDate] || [];
+        const todayTasks = allData[todayKey] || [];
+
+        const existingCarryIds = todayTasks.filter(t => t.carryOver).map(t => t.originalId || t.id);
+        const toCarry = lastTasks.filter(t => !t.done && !existingCarryIds.includes(t.id));
+        if (toCarry.length === 0) return;
+
+        for (const t of toCarry) {
+            const newTask = {
+                id: generateId(),
+                date: todayKey,
+                text: t.text,
+                priority: t.priority,
+                notes: t.notes || '',
+                link: t.link || '',
+                done: false,
+                carryOver: true,
+                originalId: t.id,
+                fromDate: lastDate,
+                createdAt: Date.now()
+            };
+            if (!allData[todayKey]) allData[todayKey] = [];
+            allData[todayKey].push(newTask);
+            await apiCall('addTask', {}, newTask);
+        }
+        setCachedTasks(todayKey, allData[todayKey]);
+    }
+
+    // --- Streak ---
+    function calculateStreak() {
+        let streak = 0;
+        const today = new Date();
+        const todayKey = getDateKey(today);
+        let checkDate = new Date(today);
+
+        if (!allData[todayKey] || allData[todayKey].length === 0) {
+            checkDate.setDate(checkDate.getDate() - 1);
+        }
+
+        for (let i = 0; i < 365; i++) {
+            const key = getDateKey(checkDate);
+            const tasks = allData[key];
+            if (!tasks || tasks.length === 0) break;
+            if (!tasks.every(t => t.done)) break;
+            streak++;
+            checkDate.setDate(checkDate.getDate() - 1);
+        }
+        return streak;
     }
 
     // --- Progress ---
@@ -401,22 +474,20 @@
     }
 
     function renderHistory() {
-        const data = loadData();
         const todayKey = getDateKey(new Date());
         const $list = $('#historyList');
         const $empty = $('#historyEmpty');
         $list.innerHTML = '';
 
-        const historyDates = Object.keys(data).filter(d => d !== todayKey && data[d].length > 0).sort().reverse();
+        const historyDates = Object.keys(allData).filter(d => d !== todayKey && allData[d].length > 0).sort().reverse();
         if (historyDates.length === 0) { $empty.style.display = 'block'; return; }
         $empty.style.display = 'none';
 
         historyDates.slice(0, 14).forEach(dateKey => {
-            const tasks = data[dateKey];
+            const tasks = allData[dateKey];
             const done = tasks.filter(t => t.done).length;
             const percent = Math.round((done / tasks.length) * 100);
             const d = new Date(dateKey + 'T00:00:00');
-
             let barColor = percent === 100 ? '#10b981' : percent >= 50 ? '#4f6ef7' : '#f59e0b';
 
             const li = document.createElement('li');
@@ -444,9 +515,14 @@
     }
 
     // --- Init ---
-    function init() {
-        processCarryOver(getDateKey(new Date()));
+    async function init() {
+        // Load from API (or cache)
+        await loadAllFromAPI();
 
+        // Process carry-over
+        await processCarryOver(getDateKey(new Date()));
+
+        // Form submit
         $('#addTaskForm').addEventListener('submit', (e) => {
             e.preventDefault();
             const input = $('#taskInput');
@@ -457,6 +533,7 @@
             input.focus();
         });
 
+        // Date navigation
         $('#prevDay').addEventListener('click', () => {
             currentDate.setDate(currentDate.getDate() - 1);
             openDetailId = null;
@@ -473,6 +550,7 @@
             }
         });
 
+        // History toggle
         $('#historyToggle').addEventListener('click', () => {
             const $content = $('#historyContent');
             const $toggle = $('#historyToggle');
